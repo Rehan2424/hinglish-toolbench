@@ -117,6 +117,15 @@ def cmd_eval(args: argparse.Namespace) -> None:
     print(to_markdown(report, title=args.title or Path(args.predictions or "oracle").stem))
 
 
+def cmd_export_sft(args: argparse.Namespace) -> None:
+    from .sft import to_sft
+
+    rng = random.Random(args.seed)
+    rows = [to_sft(ex, rng) for ex in _load_examples(args.examples)]
+    n = write_jsonl(args.out, rows)
+    print(f"wrote {n} chat examples to {args.out}")
+
+
 def cmd_stats(args: argparse.Namespace) -> None:
     examples = _load_examples(args.examples)
     print(f"{len(examples)} examples")
@@ -231,6 +240,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--decisions", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_apply_review)
+
+    p = sub.add_parser("export-sft", help="render examples as chat data for fine-tuning")
+    p.add_argument("--examples", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(fn=cmd_export_sft)
 
     p = sub.add_parser("stats", help="dataset composition")
     p.add_argument("--examples", required=True)
