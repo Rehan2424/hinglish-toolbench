@@ -173,6 +173,9 @@ def to_markdown(report: dict, title: str = "Results") -> str:
               "hallucination_rate", "tool_selection_accuracy", "arg_precision", "arg_recall",
               "arg_f1", "false_call_rate"):
         lines.append(f"| {k} | {_fmt(o[k])} |")
+    if "latency_s" in report:
+        lat = report["latency_s"]
+        lines.append(f"| latency median / p90 (s) | {lat['median']:.2f} / {lat['p90']:.2f} |")
     for group in ("by_category", "by_script"):
         lines += ["", f"| {group.split('_')[1]} | n | task acc | arg F1 |", "|---|---|---|---|"]
         for name, s in report[group].items():

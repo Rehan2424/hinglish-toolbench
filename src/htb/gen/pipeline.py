@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -228,7 +229,9 @@ def predict(examples: Iterable[Example], model: Chat, out_path: str | Path, *,
     todo = [e for e in examples if e.id not in done]
 
     def work(ex: Example) -> tuple[str, dict]:
+        start = time.perf_counter()
         raw = model.chat(agent_messages(ex), temperature=0.0, max_tokens=max_tokens)
-        return "ok", {"id": ex.id, "output": raw}
+        return "ok", {"id": ex.id, "output": raw,
+                      "latency_s": round(time.perf_counter() - start, 3)}
 
     return _run(todo, work, out_path, None, workers, "predict")

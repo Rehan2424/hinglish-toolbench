@@ -28,3 +28,6 @@ checkpoints/
 .idea/
 .DS_Store
 *.log
+
+# scratch evaluations (final reports live in reports/)
+reports/local/

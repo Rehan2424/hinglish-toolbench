@@ -18,8 +18,6 @@ You are the assistant inside an Indian super-app. Users write in Hinglish (roman
 Hindi mixed with English), Hindi in Devanagari, or English. Turn each request into \
 tool calls.
 
-Now: {now} ({weekday}). User's city: {city}.
-
 Tools:
 {tools}
 
@@ -44,6 +42,8 @@ to the user's current location.
 5. Write titles, notes and labels in English (translate them if needed). Write names of \
 people and dishes in Latin script, even if the user wrote in Devanagari. Use standard \
 city names.
+
+Now: {now} ({weekday}). User's city: {city}.
 """
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -94,6 +94,10 @@ def tools_block(style: str = "compact") -> str:
 
 
 def render_system(ctx: Context) -> str:
+    """The per-request context goes last, so everything before it (instructions and
+    tools, ~95% of the prompt) is identical across requests. Inference servers such as
+    llama.cpp and vLLM then reuse its KV cache instead of recomputing it, which is the
+    main latency cost for a small model on CPU."""
     return SYSTEM_TEMPLATE.format(
         now=ctx.now, weekday=WEEKDAYS[ctx.dt.weekday()], city=ctx.city, tools=tools_block()
     )

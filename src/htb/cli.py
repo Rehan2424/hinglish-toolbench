@@ -110,8 +110,15 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
         outputs = {e.id: render_target(e.expected) for e in examples}
     else:
-        outputs = {r["id"]: r["output"] for r in read_jsonl(args.predictions)}
+        rows = list(read_jsonl(args.predictions))
+        outputs = {r["id"]: r["output"] for r in rows}
     report, per_example = evaluate(examples, outputs)
+    if not args.oracle:
+        lat = sorted(r["latency_s"] for r in rows if "latency_s" in r and r["id"] in outputs)
+        if lat:
+            report["latency_s"] = {"n": len(lat), "median": lat[len(lat) // 2],
+                                   "p90": lat[min(len(lat) - 1, int(0.9 * len(lat)))],
+                                   "mean": round(sum(lat) / len(lat), 3)}
     if args.report:
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         Path(args.report).write_text(json.dumps(report, indent=2), encoding="utf-8")
