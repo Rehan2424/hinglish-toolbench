@@ -18,7 +18,8 @@ def _client(args: argparse.Namespace):
 
     load_dotenv()
     return ChatClient(args.provider, args.model, base_url=args.base_url,
-                      requests_per_minute=args.rpm)
+                      requests_per_minute=args.rpm,
+                      extra_body=json.loads(args.extra) if args.extra else None)
 
 
 def _add_model_args(p: argparse.ArgumentParser) -> None:
@@ -27,6 +28,8 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-url", default=None, help="override the provider URL")
     p.add_argument("--rpm", type=float, default=None, help="requests-per-minute cap")
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--extra", default=None,
+                   help='extra JSON fields for the request, e.g. \'{"reasoning_effort": "low"}\'')
 
 
 def _load_examples(path: str) -> list[Example]:
@@ -76,8 +79,15 @@ def cmd_generate(args: argparse.Namespace) -> None:
 def cmd_verify(args: argparse.Namespace) -> None:
     from .gen.pipeline import verify
 
-    stats = verify(_load_examples(args.examples), _client(args), args.out, args.rejects,
-                   workers=args.workers, verifier_name=f"{args.provider}/{args.model}")
+    verifiers = [(f"{args.provider}/{args.model}", _client(args))]
+    if args.fallback_model:
+        fb = argparse.Namespace(**vars(args))
+        fb.provider = args.fallback_provider or args.provider
+        fb.model = args.fallback_model
+        fb.extra = args.fallback_extra
+        verifiers.append((f"{fb.provider}/{fb.model}", _client(fb)))
+    stats = verify(_load_examples(args.examples), verifiers, args.out, args.rejects,
+                   workers=args.workers)
     print(dict(stats))
 
 
@@ -145,6 +155,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--rejects", required=True)
     _add_model_args(p)
+    p.add_argument("--fallback-model", help="second verifier, tried only on mismatches")
+    p.add_argument("--fallback-provider", help="defaults to --provider")
+    p.add_argument("--fallback-extra", default=None)
     p.set_defaults(fn=cmd_verify)
 
     p = sub.add_parser("predict", help="run a model on examples")

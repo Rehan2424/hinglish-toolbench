@@ -20,6 +20,7 @@ from typing import Any, Protocol
 from ..eval.metrics import score_example
 from ..eval.parse import extract_json
 from ..io import existing_ids
+from ..llm import QuotaExhausted
 from ..prompting import agent_messages
 from ..schema import Example, Message
 from ..tools import TOOLS
@@ -58,6 +59,11 @@ def _run(items: list[Any], fn: Callable[[Any], tuple[str, dict]], out_path: str 
         for i, fut in enumerate(as_completed(futures), start=1):
             try:
                 status, row = fut.result()
+            except QuotaExhausted as exc:
+                print(f"[{label}] stopping: {exc}"[:300], file=sys.stderr)
+                stats["stopped_quota"] += 1
+                pool.shutdown(wait=True, cancel_futures=True)
+                break
             except Exception as exc:  # one failed call should not kill a long run
                 status, row = "error", {}
                 print(f"[{label}] error: {exc!r}"[:300], file=sys.stderr)
@@ -86,7 +92,9 @@ def lint(example: Example) -> str | None:
             return "leaked tool or field name"
     joined = " ".join(user_texts)
     deva, latin = len(_DEVANAGARI.findall(joined)), len(_LATIN.findall(joined))
-    if example.script == "devanagari" and deva < 0.5 * (deva + latin):
+    # Devanagari messages legitimately keep English words ("मेरा water bill भर दो"),
+    # so only require a substantial share of Devanagari letters.
+    if example.script == "devanagari" and deva < 0.3 * (deva + latin):
         return "expected mostly Devanagari"
     if example.script in ("roman", "english") and deva > 0:
         return "unexpected Devanagari"
@@ -97,6 +105,16 @@ def lint(example: Example) -> str | None:
             if value and re.sub(r"\D", "", value) not in digits:
                 return f"{key} missing from text"
     return None
+
+
+_LOOSE_USER = re.compile(r'^\s*\{\s*"user"\s*:\s*"(.*)"\s*\}\s*$', re.DOTALL)
+
+
+def _loose_user(raw: str) -> dict | None:
+    """Recover ``{"user": "..."}`` when the message contains unescaped quotes."""
+    text = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+    m = _LOOSE_USER.match(text)
+    return {"user": m.group(1).replace('"', "")} if m else None
 
 
 def assemble(scenario: Scenario, obj: Any) -> Example:
@@ -135,10 +153,17 @@ def generate(scenarios: Iterable[Scenario], teacher: Chat, out_path: str | Path,
         raw = teacher.chat([{"role": "user", "content": prompt}], temperature=temperature,
                            max_tokens=600)
         try:
-            ex = assemble(s, extract_json(raw))
+            ex = assemble(s, extract_json(raw) or _loose_user(raw))
         except ValueError as exc:
             return "bad_output", {"id": s.id, "reason": str(exc), "raw": raw}
         reason = lint(ex)
+        user_text = " ".join(m.content for m in ex.messages if m.role == "user")
+        if reason == "expected mostly Devanagari" and not _DEVANAGARI.search(user_text):
+            # The teacher wrote clean romanized Hinglish instead. Still a valid example,
+            # just of the other script: relabel rather than throw it away.
+            ex.script = "roman"
+            ex.meta["script_relabelled"] = "devanagari->roman"
+            reason = lint(ex)
         if reason:
             return "lint_fail", {"id": s.id, "reason": reason, "example": ex.model_dump()}
         ex.meta["teacher"] = teacher_name
@@ -147,23 +172,32 @@ def generate(scenarios: Iterable[Scenario], teacher: Chat, out_path: str | Path,
     return _run(todo, work, out_path, reject_path, workers, "generate")
 
 
-def verify(examples: Iterable[Example], verifier: Chat, out_path: str | Path,
-           reject_path: str | Path, *, workers: int = 4, verifier_name: str = "") -> Counter:
+def verify(examples: Iterable[Example], verifiers: list[tuple[str, Chat]],
+           out_path: str | Path, reject_path: str | Path, *, workers: int = 4) -> Counter:
     """Round-trip check: a model that never saw the label must recover it from the text.
 
-    If it cannot, the phrasing is ambiguous or unfaithful and the example is dropped.
+    Verifiers are tried in order and the example is kept as soon as one recovers the
+    label. A single verifier would also reject examples it simply gets wrong (for
+    instance misreading "saade 4" as 16:00), which would quietly strip the hardest
+    cases from the data. Examples every verifier rejects go to ``reject_path`` with
+    all outputs attached; they are prime candidates for the hand-checked test set.
     """
     done = existing_ids(out_path, reject_path)
     todo = [e for e in examples if e.id not in done]
 
     def work(ex: Example) -> tuple[str, dict]:
-        raw = verifier.chat(agent_messages(ex), temperature=0.0, max_tokens=600)
-        s = score_example(ex, raw)
+        attempts = []
+        for name, client in verifiers:
+            raw = client.chat(agent_messages(ex), temperature=0.0, max_tokens=700)
+            s = score_example(ex, raw)
+            attempts.append({"verifier": name, "output": raw, "error": s.error})
+            if s.correct:
+                row = ex.model_dump()
+                row["meta"] = {**row["meta"], "verified_by": name, "verify_attempts": attempts}
+                return "ok", row
         row = ex.model_dump()
-        row["meta"] = {**row["meta"], "verifier": verifier_name, "verifier_output": raw}
-        if s.correct:
-            return "ok", row
-        return "mismatch", {**row, "reason": s.error or "verifier disagreed with label"}
+        row["meta"] = {**row["meta"], "verify_attempts": attempts}
+        return "mismatch", row
 
     return _run(todo, work, out_path, reject_path, workers, "verify")
 

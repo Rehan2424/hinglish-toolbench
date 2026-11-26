@@ -149,5 +149,9 @@ def test_generate_and_verify_end_to_end(tmp_path):
     if examples:
         ex = examples[0]
         vout, vrej = tmp_path / "ver.jsonl", tmp_path / "vrej.jsonl"
-        stats = verify([ex], OracleVerifier(ex.expected), vout, vrej, workers=1)
+        wrong = OracleVerifier(type(ex.expected)(action="respond"))
+        stats = verify([ex], [("bad", wrong), ("good", OracleVerifier(ex.expected))],
+                       vout, vrej, workers=1)
         assert stats["ok"] == 1
+        row = next(read_jsonl(vout))
+        assert row["meta"]["verified_by"] == "good" and len(row["meta"]["verify_attempts"]) == 2

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import threading
 import time
 from pathlib import Path
@@ -42,10 +43,19 @@ class LLMError(RuntimeError):
     pass
 
 
+class QuotaExhausted(LLMError):
+    """The provider's daily quota is used up; retrying today is pointless."""
+
+
+# Groq says "requests per day (RPD)"; Gemini names quotas like "...PerDay...".
+_DAILY_QUOTA = re.compile(r"per day|RPD|PerDay|TPD", re.IGNORECASE)
+
+
 class ChatClient:
     def __init__(self, provider: str, model: str, *, base_url: str | None = None,
                  api_key: str | None = None, timeout: float = 90.0, max_retries: int = 6,
-                 requests_per_minute: float | None = None) -> None:
+                 requests_per_minute: float | None = None,
+                 extra_body: dict | None = None) -> None:
         if provider not in PROVIDERS and base_url is None:
             raise ValueError(f"unknown provider {provider!r}; pass base_url")
         default_url, key_env = PROVIDERS.get(provider, (base_url, None))
@@ -55,6 +65,7 @@ class ChatClient:
         if key_env and not self.api_key:
             raise LLMError(f"{key_env} is not set (add it to .env)")
         self.max_retries = max_retries
+        self.extra_body = dict(extra_body or {})
         self._http = httpx.Client(timeout=timeout)
         self._min_gap = 60.0 / requests_per_minute if requests_per_minute else 0.0
         self._lock = threading.Lock()
@@ -73,7 +84,7 @@ class ChatClient:
     def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.0,
              max_tokens: int = 1024, json_mode: bool = False) -> str:
         body: dict = {"model": self.model, "messages": messages, "temperature": temperature,
-                      "max_tokens": max_tokens}
+                      "max_tokens": max_tokens, **self.extra_body}
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         headers = {"Content-Type": "application/json"}
@@ -95,6 +106,8 @@ class ChatClient:
                         return data["choices"][0]["message"]["content"] or ""
                     except (KeyError, IndexError) as exc:
                         raise LLMError(f"unexpected response: {str(data)[:300]}") from exc
+                if r.status_code == 429 and _DAILY_QUOTA.search(r.text):
+                    raise QuotaExhausted(f"daily quota used up for {self.model}: {r.text[:200]}")
                 if r.status_code not in RETRY_STATUS or attempt == self.max_retries:
                     raise LLMError(f"HTTP {r.status_code}: {r.text[:300]}")
                 retry_after = r.headers.get("retry-after")

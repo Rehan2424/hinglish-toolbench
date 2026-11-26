@@ -54,7 +54,7 @@ def test_policy_lookup():
 
 
 def test_prompt_schema_is_compact_and_complete():
-    block = tools_block()
+    block = tools_block("json")
     lines = block.splitlines()
     assert len(lines) == len(TOOLS)
     for line in lines:

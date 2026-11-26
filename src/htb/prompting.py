@@ -38,20 +38,59 @@ plans and yesterday for past records; "parso" is the day after tomorrow; "is <da
 start Monday). "pichle N din" means start_date = today minus N days, end_date = today. \
 A month name in a past-records request means its most recent full occurrence.
 3. A time with no date means its next occurrence from now.
-4. If the user does not name a departure city or location, use their city.
-5. Write free-text values (titles, notes, labels, dish names) and names of people in \
-English or romanized script, even if the user wrote in Devanagari. Use standard city names.
+4. If the user names no departure city (trains, flights) or no city for weather, use \
+their city. Leave out cab pickup and restaurant location unless named; they default \
+to the user's current location.
+5. Write titles, notes and labels in English (translate them if needed). Write names of \
+people and dishes in Latin script, even if the user wrote in Devanagari. Use standard \
+city names.
 """
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
-@lru_cache(maxsize=1)
-def tools_block() -> str:
-    return "\n".join(
-        json.dumps(t.json_schema(), ensure_ascii=False, separators=(",", ":"))
-        for t in TOOLS.values()
-    )
+def _type(schema: dict) -> str:
+    if "enum" in schema:
+        return "|".join(json.dumps(v) for v in schema["enum"])
+    t = schema.get("type")
+    if t == "array":
+        return f"list[{_type(schema.get('items', {}))}]"
+    if t == "object":
+        req = set(schema.get("required", []))
+        fields = []
+        for name, sub in schema.get("properties", {}).items():
+            opt = "" if name in req else "?"
+            default = f" = {json.dumps(sub['default'])}" if "default" in sub else ""
+            fields.append(f"{name}{opt}: {_type(sub)}{default}")
+        return "{" + ", ".join(fields) + "}"
+    return {"number": "number", "integer": "int", "boolean": "bool"}.get(t, "string")
+
+
+def compact_signature(schema: dict) -> str:
+    params = schema["parameters"]
+    req = set(params.get("required", []))
+    lines = [f"{schema['name']}: {schema['description']}"]
+    for name, sub in params.get("properties", {}).items():
+        opt = "" if name in req else "?"
+        default = f" = {json.dumps(sub['default'])}" if "default" in sub else ""
+        desc = f"  # {sub['description']}" if sub.get("description") else ""
+        lines.append(f"  {name}{opt}: {_type(sub)}{default}{desc}")
+    return "\n".join(lines)
+
+
+@lru_cache(maxsize=2)
+def tools_block(style: str = "compact") -> str:
+    """Tool list for the system prompt.
+
+    ``compact`` (default) renders signatures like ``mode?: "upi"|"imps" = "upi"``, which
+    is about half the tokens of raw JSON schema. That matters for a small model on CPU,
+    where prompt length dominates latency. ``json`` is kept for comparison.
+    """
+    schemas = [t.json_schema() for t in TOOLS.values()]
+    if style == "json":
+        return "\n".join(json.dumps(s, ensure_ascii=False, separators=(",", ":"))
+                         for s in schemas)
+    return "\n".join(compact_signature(s) for s in schemas)
 
 
 def system_prompt(example: Example) -> str:

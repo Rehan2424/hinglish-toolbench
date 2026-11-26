@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 
-from ..prompting import WEEKDAYS
+from ..prompting import WEEKDAYS, compact_signature
 from ..tools import TOOLS
 from .sampler import Scenario
 
 SCRIPT_INSTRUCTIONS = {
     "roman": "Romanized Hinglish: Hindi written in Latin letters, mixed naturally with "
              "English words, the way people text on WhatsApp.",
-    "devanagari": "Mainly Hindi in Devanagari script. Everyday English words (train, bill, "
-                  "UPI, AC, booking) may stay in Latin letters or be written in Devanagari.",
+    "devanagari": "Hindi written in DEVANAGARI SCRIPT, for example: "
+                  "\"कल सुबह 7 बजे के बाद दिल्ली से जयपुर की ट्रेन दिखाओ\". Romanized Hindi "
+                  "(Latin letters) is NOT acceptable here: transliterate every Hindi phrase you "
+                  "are given into Devanagari. Only everyday English words (train, bill, UPI, AC) "
+                  "and numbers may stay in Latin letters.",
     "english": "Mostly Indian English with a few Hindi words mixed in.",
 }
 
@@ -38,8 +41,10 @@ Language: {script}
 Rules:
 - Do not add any detail that is not listed. Do not leave out any listed detail.
 - When a phrase is given in quotes, use it (transliterate it if the language needs another \
-script), never the exact date or time it stands for.
-- Never mention tools, functions, JSON, or field names. Write only what the user types.
+script), never the exact date or time it stands for. Do not put quotation marks around it \
+in the message.
+- Never mention tools, functions, JSON, or field names (nothing with an underscore). Write \
+only what the user types.
 - Keep it natural and short (one or two sentences per message).
 {examples}
 Return only JSON in this format:
@@ -54,7 +59,7 @@ def _task(s: Scenario) -> str:
     target = {"action": s.expected.action,
               "tool_calls": [c.model_dump() for c in s.expected.tool_calls]}
     tools = sorted({c.name for c in s.expected.tool_calls} | set(s.meta.get("tools", [])))
-    specs = "\n".join(json.dumps(TOOLS[t].json_schema(), ensure_ascii=False) for t in tools)
+    specs = "\n".join(compact_signature(TOOLS[t].json_schema()) for t in tools)
     lines = [f"App feature(s) involved, for your reference:\n{specs}", ""]
     if s.category == "clarify":
         lines.append("The user asks for this but forgets one required detail, so the assistant "
@@ -85,12 +90,18 @@ def build_teacher_prompt(s: Scenario, style_examples: list[str] | None = None) -
     dt = s.context.dt
     style = ""
     if s.style:
-        style = "Style: " + "; ".join(s.style) + "\n"
+        styles = list(s.style)
+        if s.script == "devanagari":  # roman short forms ("kr do", "plz") fight the script
+            styles = [("casual texting: informal, short, little punctuation"
+                       if st.startswith("casual") else st) for st in styles]
+        style = "Style: " + "; ".join(styles) + "\n"
     examples = ""
     if style_examples:
         examples = ("\nFor tone only, real-sounding messages look like:\n"
                     + "\n".join(f"- {e}" for e in style_examples) + "\n")
     fmt = OUTPUT_FORMATS["multi_turn" if s.category == "multi_turn" else "one_turn"]
+    if s.script == "devanagari":
+        fmt += "\nAll user messages must be in Devanagari script."
     return TEMPLATE.format(
         weekday=WEEKDAYS[dt.weekday()], date=dt.strftime("%d %B %Y"), time=dt.strftime("%H:%M"),
         city=s.context.city, task=_task(s), hints=_hints(s), script=SCRIPT_INSTRUCTIONS[s.script],
