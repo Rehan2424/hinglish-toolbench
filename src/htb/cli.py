@@ -174,6 +174,21 @@ def cmd_apply_review(args: argparse.Namespace) -> None:
     print(stats)
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from .server import create_app
+
+    app = create_app(_client(args), model_name=args.name or args.model)
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+def cmd_mcp(args: argparse.Namespace) -> None:
+    from .mcp_server import build_server
+
+    build_server(_client(args)).run()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="htb", description="Hinglish tool-calling benchmark")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -255,6 +270,17 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("stats", help="dataset composition")
     p.add_argument("--examples", required=True)
     p.set_defaults(fn=cmd_stats)
+
+    p = sub.add_parser("serve", help="HTTP API and demo page")
+    _add_model_args(p)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--name", help="model name shown in the demo")
+    p.set_defaults(fn=cmd_serve)
+
+    p = sub.add_parser("mcp", help="MCP server over stdio")
+    _add_model_args(p)
+    p.set_defaults(fn=cmd_mcp)
 
     args = parser.parse_args(argv)
     if args.command == "eval" and not (args.oracle or args.predictions):

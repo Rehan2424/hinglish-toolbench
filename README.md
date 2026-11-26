@@ -95,6 +95,13 @@ Results are reported overall, by category, and by script.
 
 *Coming soon:* hosted API baselines, zero-shot and few-shot small models, and the fine-tuned model (full precision and 4-bit), with CPU latency and cost per 1,000 requests.
 
+## Related work
+
+- **Tool-calling benchmarks.** [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) set the standard categories (simple, parallel, relevance, irrelevance) that this benchmark follows. [BFCL-Hi](https://arxiv.org/abs/2508.19831) and [MLCL](https://arxiv.org/abs/2601.05366) translate BFCL queries into Hindi and other languages. Both use formal, translated Hindi with generic tools. This benchmark targets what Indian users actually type: romanized, code-mixed Hinglish, India-specific services (UPI, PNR, 3AC), and spoken forms of dates, times and amounts.
+- **Code-mixing and LLMs.** [CodeMixBench](https://arxiv.org/abs/2505.05063) finds that Hinglish prompts lower accuracy, most sharply for small models. [COMI-LINGUA](https://arxiv.org/abs/2503.21670) provides human-annotated Hinglish data for classic NLP tasks. Neither covers structured actions.
+- **Small models for function calling.** [TinyAgent](https://arxiv.org/abs/2409.00608) and Google's [FunctionGemma](https://blog.google/technology/developers/functiongemma/) show that small fine-tuned models can handle tool calls on-device. [TinyLLM](https://arxiv.org/abs/2511.22138) finds 1–3B models clearly ahead of sub-1B ones. This project tests whether that holds for code-mixed input, at 0.6B and 1.7B parameters.
+- **Synthetic data.** Most synthetic tool-calling sets (e.g. [APIGen](https://arxiv.org/abs/2406.18518)) have an LLM write the query and its label together, then filter the result. Here the label is fixed first in code, and the LLM writes only the query. Filtering checks whether an independent model can recover that label.
+
 ## Quickstart
 
 ```bash
@@ -150,6 +157,38 @@ scripts/make_kaggle_bundle.sh data/splits data/test.jsonl   # data + scripts -> 
 htb eval --examples data/test.jsonl --predictions preds/qwen3-1.7b-lora.jsonl
 ```
 
+## Serving
+
+The model only *proposes* actions. Every call is validated against the tool schemas before anything runs, and invalid calls are reported, never executed. The demo runs valid calls against a mock backend that returns fake, deterministic data.
+
+```bash
+pip install -e ".[serve]"
+
+# the small model on CPU, through llama.cpp's OpenAI-compatible server
+llama-server -hf <user>/<repo>:Q4_K_M --port 8080 --jinja
+htb serve --provider local --model qwen3-1.7b-lora \
+    --extra '{"chat_template_kwargs": {"enable_thinking": false}}'
+# or any hosted model
+htb serve --provider groq --model openai/gpt-oss-20b
+```
+
+Open `http://localhost:8000` for the demo page, or call the API:
+
+```bash
+curl -s localhost:8000/api/chat -H 'Content-Type: application/json' \
+  -d '{"messages": [{"role": "user", "content": "Priya ko dedh hazaar bhej do"}], "city": "Pune"}'
+```
+
+```json
+{"action": "call", "ok": true, "latency_ms": 412.3,
+ "tool_calls": [{"name": "transfer_money", "arguments": {"recipient": "Priya", "amount": 1500.0}, "valid": true}],
+ "executions": [{"tool": "transfer_money", "summary": "Sent ₹1,500 to Priya via UPI. Ref UPI…"}]}
+```
+
+**MCP.** `htb mcp` exposes the model as an [MCP](https://modelcontextprotocol.io) server over stdio, with an `understand_request` tool and the tool schemas as a resource. An agent can then hand Hinglish requests to the small local model and get validated calls back.
+
+**Docker.** `deploy/Dockerfile` bundles llama.cpp and the API in one CPU-only image, which can also run as a Hugging Face Docker Space.
+
 ## Repository layout
 
 ```text
@@ -169,8 +208,13 @@ src/htb/
     matching.py   per-field matching, call alignment
     metrics.py    scoring and reports
   llm.py          OpenAI-compatible client with retries and rate limiting
+  assistant.py    live inference: prompt, parse, validate
+  server.py       FastAPI service and demo page (demo.html)
+  mcp_server.py   MCP server
+  mock_backend.py fake tool implementations for the demo
   cli.py          `htb` command
 training/         LoRA fine-tuning, batched inference, Kaggle notebook
+deploy/           CPU Docker image (llama.cpp + API)
 scripts/          pool building, Kaggle bundle
 data/seed/        hand-written examples (style references and test fixtures)
 tests/            unit and pipeline tests
@@ -190,7 +234,8 @@ tests/            unit and pipeline tests
 - [ ] Hosted API and zero-shot baselines
 - [ ] LoRA fine-tuning of 0.6B and 1.7B models (ablations: data size, filtering, script, prompt format)
 - [ ] 4-bit quantization, CPU latency benchmark, cost comparison
-- [ ] FastAPI service, MCP server, Docker image, live demo
+- [x] FastAPI service, demo page, MCP server
+- [ ] Docker image with the fine-tuned model, live demo on Hugging Face Spaces
 
 ## License
 

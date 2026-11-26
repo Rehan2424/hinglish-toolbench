@@ -13,7 +13,9 @@ authors = [{ name = "Rehan Chouhan" }]
 dependencies = ["pydantic>=2.6", "httpx>=0.27"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "fastapi>=0.110"]
+serve = ["fastapi>=0.110", "uvicorn>=0.29"]
+mcp = ["mcp>=1.2"]
 
 [project.scripts]
 htb = "htb.cli:main"

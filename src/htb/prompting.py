@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from .schema import Example, Expected
+from .schema import Context, Example, Expected
 from .tools import TOOLS
 
 SYSTEM_TEMPLATE = """\
@@ -93,11 +93,14 @@ def tools_block(style: str = "compact") -> str:
     return "\n".join(compact_signature(s) for s in schemas)
 
 
-def system_prompt(example: Example) -> str:
-    ctx = example.context
+def render_system(ctx: Context) -> str:
     return SYSTEM_TEMPLATE.format(
         now=ctx.now, weekday=WEEKDAYS[ctx.dt.weekday()], city=ctx.city, tools=tools_block()
     )
+
+
+def system_prompt(example: Example) -> str:
+    return render_system(example.context)
 
 
 def agent_messages(example: Example) -> list[dict[str, str]]:
