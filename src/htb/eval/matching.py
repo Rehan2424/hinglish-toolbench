@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ..lexicon import CITY_ALIASES, PEOPLE_ALIASES
+from ..lexicon import CITY_ALIASES, FREE_TEXT_ALTERNATES, PEOPLE_ALIASES
 from ..tools import ENTITY, FUZZY, TOOLS, field_policy, item_model
 
 TOKEN_F1_THRESHOLD = 0.6
@@ -74,6 +74,17 @@ def token_f1(a: str, b: str) -> float:
     return 2 * p * r / (p + r)
 
 
+@lru_cache(maxsize=1)
+def _alternates() -> dict[str, list[str]]:
+    return {norm_text(k): v for k, v in FREE_TEXT_ALTERNATES.items()}
+
+
+def fuzzy_match(gold: str, pred: str) -> bool:
+    """Free-text match against the gold label or any of its accepted alternatives."""
+    candidates = [gold] + _alternates().get(norm_text(gold), [])
+    return any(fuzzy_equal(c, pred) for c in candidates)
+
+
 def fuzzy_equal(a: str, b: str) -> bool:
     na, nb = norm_text(a), norm_text(b)
     if na == nb:
@@ -92,7 +103,7 @@ def scalar_match(policy: str, gold: Any, pred: Any) -> bool:
         if policy == ENTITY:
             return entity_key(gold) == entity_key(pred)
         if policy == FUZZY:
-            return fuzzy_equal(gold, pred)
+            return fuzzy_match(gold, pred)
         return gold == pred
     return gold == pred
 

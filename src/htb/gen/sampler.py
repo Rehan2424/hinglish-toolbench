@@ -460,7 +460,8 @@ SCRIPT_WEIGHTS = {"roman": 60, "devanagari": 20, "english": 20}
 STYLE_OPTIONS = [
     ("casual texting: lowercase, few or no punctuation marks, short forms like 'kr do', 'plz'", 0.35),
     ("polite: uses 'please', 'zara', 'ji'", 0.25),
-    ("adds one irrelevant bit of context (e.g. why they need it)", 0.2),
+    ("adds a little irrelevant small talk (e.g. 'bahut busy din hai'), which must not read "
+     "as a note, title, reason for payment or any other detail of the request", 0.2),
     ("one or two small typos", 0.15),
 ]
 

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #2f5bd3; --ok: #1f7a4d; --bad: #b3261e; --warn: #9a6700; --code: #f1f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9c9b94; --line: #33322f;
+      --accent: #7fa2ff; --ok: #5cc28f; --bad: #ff8a80; --warn: #e3b341; --code: #282826;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line);
+           padding: 12px 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; z-index: 2; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .bar { flex: 1; min-width: 160px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .counts { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  main { max-width: 920px; margin: 24px auto; padding: 0 24px 80px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; }
+  .tag { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.warn { color: var(--warn); border-color: currentColor; }
+  .ctx { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .msg { padding: 10px 14px; border-radius: 10px; margin: 8px 0; max-width: 85%; white-space: pre-wrap; }
+  .msg.user { background: var(--code); }
+  .msg.assistant { margin-left: auto; border: 1px dashed var(--line); color: var(--muted); }
+  .msg .who { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .msg.user .text { font-size: 17px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 8px; }
+  textarea { width: 100%; min-height: 170px; font: 13px/1.45 ui-monospace, Consolas, monospace;
+             background: var(--code); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  textarea.invalid { border-color: var(--bad); }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; }
+  details { margin-top: 10px; font-size: 13px; }
+  details pre { white-space: pre-wrap; background: var(--code); padding: 8px; border-radius: 6px; }
+  .checks { font-size: 13px; color: var(--muted); margin: 12px 0 0; padding-left: 18px; }
+  .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+  button.bad { background: var(--bad); color: #fff; border-color: var(--bad); }
+  input.comment { flex: 1; min-width: 200px; font: inherit; padding: 8px 10px; border-radius: 8px;
+                  border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  .status { font-weight: 600; }
+  .status.accept { color: var(--ok); } .status.reject { color: var(--bad); }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 5px; }
+  .help { color: var(--muted); font-size: 13px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>__TITLE__</h1>
+  <div class="bar"><div id="progress"></div></div>
+  <span class="counts" id="counts"></span>
+  <button id="jump">Next undecided</button>
+  <button id="export">Export decisions</button>
+</header>
+<main>
+  <div class="card" id="card"></div>
+  <p class="help">
+    <kbd>A</kbd> accept &nbsp; <kbd>R</kbd> reject &nbsp; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> previous/next &nbsp;
+    <kbd>E</kbd> edit label. Edits are saved with Accept. Progress is kept in this browser
+    automatically; click <b>Export decisions</b> when done and give the file back.
+  </p>
+</main>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const KEY = "htb-review:" + DATA.length + ":" + (DATA[0] && DATA[0].id);
+let decisions = JSON.parse(localStorage.getItem(KEY) || "{}");
+let i = 0;
+
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const save = () => localStorage.setItem(KEY, JSON.stringify(decisions));
+
+function assistantText(content) {
+  try { const o = JSON.parse(content); return o.message || content; } catch { return content; }
+}
+
+function render() {
+  const ex = DATA[i];
+  const d = decisions[ex.id];
+  const label = d && d.expected ? d.expected : ex.expected;
+  const tags = [ex.category, ex.script, ex.id];
+  const warn = [];
+  if (ex.verified_by === null || ex.verified_by === undefined) warn.push("verifiers disagreed");
+  if (ex.hard_negative) warn.push("hard negative");
+  const msgs = ex.messages.map((m) => m.role === "user"
+    ? `<div class="msg user"><span class="who">user</span><span class="text">${esc(m.content)}</span></div>`
+    : `<div class="msg assistant"><span class="who">assistant</span>${esc(assistantText(m.content))}</div>`).join("");
+  const attempts = (ex.attempts || []).map((a) =>
+    `<details><summary>${esc(a.verifier)} answered differently</summary><pre>${esc(a.output)}</pre></details>`).join("");
+  $("#card").innerHTML = `
+    <div class="meta">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}
+      ${warn.map((t) => `<span class="tag warn">${esc(t)}</span>`).join("")}</div>
+    <div class="ctx">Now: <b>${esc(ex.weekday)} ${esc(ex.now.replace("T", " "))}</b> &middot; User's city: <b>${esc(ex.city)}</b></div>
+    ${msgs}
+    <h2>Expected assistant action</h2>
+    <textarea id="label" spellcheck="false">${esc(JSON.stringify(label, null, 2))}</textarea>
+    <div class="err" id="err"></div>
+    ${attempts}
+    <ul class="checks">
+      <li>Is it something a real user would type? Is the script right?</li>
+      <li>Does the label contain exactly what the user said, no more, no less?</li>
+      <li>Dates and times: resolved correctly from "Now"?</li>
+      <li>Clarify: is a required detail really missing? Respond: is no tool really suitable?</li>
+    </ul>
+    <div class="actions">
+      <button class="ok" id="accept">Accept (A)</button>
+      <button class="bad" id="reject">Reject (R)</button>
+      <input class="comment" id="comment" placeholder="Optional note" value="${esc((d && d.comment) || "")}">
+      <span class="status ${d ? d.decision : ""}">${d ? d.decision + "ed" : "undecided"}</span>
+    </div>
+    <div class="actions">
+      <button id="prev">&larr; Prev</button><button id="next">Next &rarr;</button>
+    </div>`;
+  $("#accept").onclick = () => decide("accept");
+  $("#reject").onclick = () => decide("reject");
+  $("#prev").onclick = () => go(-1);
+  $("#next").onclick = () => go(1);
+  const done = Object.keys(decisions).length;
+  const acc = Object.values(decisions).filter((x) => x.decision === "accept").length;
+  $("#progress").style.width = (100 * done / DATA.length) + "%";
+  $("#counts").textContent = `${i + 1} / ${DATA.length} · decided ${done} · accepted ${acc}`;
+}
+
+function decide(kind) {
+  const ex = DATA[i];
+  const entry = { decision: kind, comment: $("#comment").value.trim() };
+  if (kind === "accept") {
+    let parsed;
+    try { parsed = JSON.parse($("#label").value); }
+    catch (e) { $("#label").classList.add("invalid"); $("#err").textContent = "Label is not valid JSON: " + e.message; return; }
+    if (JSON.stringify(parsed) !== JSON.stringify(ex.expected)) entry.expected = parsed;
+  }
+  decisions[ex.id] = entry;
+  save();
+  go(1);
+}
+
+function go(step) { i = Math.min(DATA.length - 1, Math.max(0, i + step)); render(); window.scrollTo(0, 0); }
+
+$("#jump").onclick = () => {
+  const k = DATA.findIndex((ex, j) => j > i && !decisions[ex.id]);
+  const any = k >= 0 ? k : DATA.findIndex((ex) => !decisions[ex.id]);
+  if (any >= 0) { i = any; render(); }
+};
+
+$("#export").onclick = () => {
+  const blob = new Blob([JSON.stringify(decisions, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "review_decisions.json";
+  a.click();
+};
+
+document.addEventListener("keydown", (e) => {
+  const typing = ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName);
+  if (e.key === "Escape") { document.activeElement.blur(); return; }
+  if (typing) return;
+  if (e.key === "a" || e.key === "A") decide("accept");
+  else if (e.key === "r" || e.key === "R") decide("reject");
+  else if (e.key === "ArrowRight") go(1);
+  else if (e.key === "ArrowLeft") go(-1);
+  else if (e.key === "e" || e.key === "E") { e.preventDefault(); $("#label").focus(); }
+});
+
+render();
+</script>
+</body>
+</html>

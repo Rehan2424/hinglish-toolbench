@@ -126,6 +126,42 @@ def cmd_stats(args: argparse.Namespace) -> None:
     print("tools", dict(tools.most_common()))
 
 
+def cmd_split(args: argparse.Namespace) -> None:
+    from .splits import dedupe, dedupe_key, split_train_dev
+
+    pool = [ex for path in args.examples for ex in _load_examples(path)]
+    exclude = {dedupe_key(e) for p in (args.exclude or []) for e in _load_examples(p)}
+    unique = dedupe(pool, exclude)
+    train, dev = split_train_dev(unique, args.dev_frac, args.seed)
+    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+    write_jsonl(Path(args.out_dir) / "train.jsonl", (e.model_dump() for e in train))
+    write_jsonl(Path(args.out_dir) / "dev.jsonl", (e.model_dump() for e in dev))
+    print(f"{len(pool)} in, {len(pool) - len(unique)} duplicates/overlaps dropped, "
+          f"train {len(train)}, dev {len(dev)}")
+
+
+def cmd_review(args: argparse.Namespace) -> None:
+    from .splits import dedupe, render_review_html
+
+    examples = dedupe([ex for path in args.examples for ex in _load_examples(path)])
+    if args.limit:
+        examples = examples[: args.limit]
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.out).write_text(render_review_html(examples, args.title), encoding="utf-8")
+    write_jsonl(Path(args.out).with_suffix(".candidates.jsonl"), (e.model_dump() for e in examples))
+    print(f"review page with {len(examples)} examples: {args.out}")
+
+
+def cmd_apply_review(args: argparse.Namespace) -> None:
+    from .splits import apply_review
+
+    candidates = _load_examples(args.candidates)
+    decisions = json.loads(Path(args.decisions).read_text(encoding="utf-8"))
+    accepted, stats = apply_review(candidates, decisions)
+    write_jsonl(args.out, (e.model_dump() for e in accepted))
+    print(stats)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="htb", description="Hinglish tool-calling benchmark")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -174,6 +210,27 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--details", help="write per-example scores (JSONL) here")
     p.add_argument("--title")
     p.set_defaults(fn=cmd_eval)
+
+    p = sub.add_parser("split", help="dedupe and split verified data into train/dev")
+    p.add_argument("--examples", nargs="+", required=True)
+    p.add_argument("--exclude", nargs="*", help="files whose messages must not appear (test)")
+    p.add_argument("--dev-frac", type=float, default=0.05)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out-dir", required=True)
+    p.set_defaults(fn=cmd_split)
+
+    p = sub.add_parser("review", help="build an offline HTML page for hand-checking examples")
+    p.add_argument("--examples", nargs="+", required=True)
+    p.add_argument("--out", required=True, help="HTML file to write")
+    p.add_argument("--title", default="Hinglish ToolBench: test set review")
+    p.add_argument("--limit", type=int, default=None)
+    p.set_defaults(fn=cmd_review)
+
+    p = sub.add_parser("apply-review", help="build the test set from exported review decisions")
+    p.add_argument("--candidates", required=True)
+    p.add_argument("--decisions", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_apply_review)
 
     p = sub.add_parser("stats", help="dataset composition")
     p.add_argument("--examples", required=True)

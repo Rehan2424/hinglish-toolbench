@@ -65,6 +65,18 @@ def test_fuzzy(a, b, same):
     assert fuzzy_equal(a, b) is same
 
 
+@pytest.mark.parametrize("gold,pred,same", [
+    ("dinner split", "Dinner share", True),
+    ("dinner split", "dinner ka hissa", True),  # the user's own phrasing
+    ("rent", "kiraya", True),
+    ("Call mummy", "Call papa", False),
+    ("rent", "trip expenses", False),
+])
+def test_free_text_alternates(gold, pred, same):
+    from htb.eval.matching import fuzzy_match
+    assert fuzzy_match(gold, pred) is same
+
+
 # ------------------------------------------------------------------ scoring
 
 TRAIN = ("search_trains", {"source": "Delhi", "destination": "Jaipur", "date": "2026-11-27",

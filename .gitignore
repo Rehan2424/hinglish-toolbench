@@ -12,7 +12,9 @@ venv/
 .env
 
 # generated data and runs (published separately)
-data/*.jsonl
+data/**/*.jsonl
+!data/seed/*.jsonl
+data/**/*.html
 data/generated/
 preds/
 reports/*.json

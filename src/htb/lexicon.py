@@ -182,6 +182,40 @@ CURRENCY_PHRASES: dict[str, list[str]] = {
     "AUD": ["Australian dollar"],
 }
 
+# Accepted alternatives for free-text labels. Free text is scored on meaning: the
+# canonical English label, common English paraphrases, and the user's own phrasing
+# (the Hinglish form) all count. Same idea as multiple ground truths in BFCL.
+_EXTRA_PARAPHRASES: dict[str, list[str]] = {
+    "dinner split": ["dinner share", "share of dinner", "dinner bill"],
+    "electricity share": ["electricity bill share", "share of electricity bill"],
+    "loan return": ["returning loan", "repayment", "loan repayment", "money returned"],
+    "trip expenses": ["trip cost", "trip share", "travel expenses"],
+    "Take medicine": ["medicine", "take medicines", "medication"],
+    "Go to the gym": ["gym"],
+    "Buy milk": ["get milk", "milk"],
+    "Water the plants": ["water plants"],
+    "Pick up laundry": ["collect laundry", "laundry"],
+    "Meet the professor": ["meeting with professor", "professor meeting"],
+    "Pack bags": ["pack bag", "packing"],
+    "Family video call": ["video call with family", "family call"],
+    "Interview prep": ["interview preparation"],
+    "Wake up": ["wake-up alarm", "alarm"],
+    "Morning walk": ["walk"],
+}
+
+
+def _free_text_alternates() -> dict[str, list[str]]:
+    table: dict[str, list[str]] = {}
+    for pairs in (REMINDER_TITLES, EVENT_TITLES, ALARM_LABELS, TRANSFER_NOTES):
+        for label, said in pairs:
+            table.setdefault(label, []).append(said)
+    for label, extra in _EXTRA_PARAPHRASES.items():
+        table.setdefault(label, []).extend(extra)
+    return table
+
+
+FREE_TEXT_ALTERNATES: dict[str, list[str]] = _free_text_alternates()
+
 # (what the user asks, is_hard_negative). Hard negatives sound like a supported
 # tool but are not: the assistant must say it cannot help instead of forcing a call.
 OUT_OF_SCOPE: list[tuple[str, bool]] = [
