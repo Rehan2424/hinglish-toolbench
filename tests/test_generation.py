@@ -135,6 +135,24 @@ class OracleVerifier:
         return render_target(self.gold)
 
 
+class OutOfQuota:
+    def chat(self, messages, **kw):
+        from htb.llm import QuotaExhausted
+        raise QuotaExhausted("daily quota used up")
+
+
+def test_verify_defers_when_fallback_is_out_of_quota(tmp_path):
+    ex = Example.model_validate(next(read_jsonl(SEEDS)))
+    wrong = OracleVerifier(type(ex.expected)(action="respond"))
+    out, rej = tmp_path / "v.jsonl", tmp_path / "r.jsonl"
+    stats = verify([ex], [("primary", wrong), ("fb", OutOfQuota())], out, rej, workers=1)
+    assert stats["deferred"] == 1
+    assert not rej.exists() or rej.stat().st_size == 0
+    # next day the fallback is back and agrees: the example is kept
+    stats = verify([ex], [("primary", wrong), ("fb", OracleVerifier(ex.expected))], out, rej)
+    assert stats["ok"] == 1
+
+
 def test_generate_and_verify_end_to_end(tmp_path):
     scenarios = [s for s in build_scenarios(60, seed=11) if s.script != "devanagari"][:10]
     out, rej = tmp_path / "gen.jsonl", tmp_path / "rej.jsonl"

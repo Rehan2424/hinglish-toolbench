@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..eval.metrics import score_example
-from ..eval.parse import extract_json
+from ..eval.parse import extract_json, strip_reasoning
 from ..io import existing_ids
 from ..llm import QuotaExhausted
 from ..prompting import agent_messages
@@ -112,7 +112,8 @@ _LOOSE_USER = re.compile(r'^\s*\{\s*"user"\s*:\s*"(.*)"\s*\}\s*$', re.DOTALL)
 
 def _loose_user(raw: str) -> dict | None:
     """Recover ``{"user": "..."}`` when the message contains unescaped quotes."""
-    text = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+    text = strip_reasoning(raw).strip()
+    text = text.removeprefix("```json").removeprefix("```").removesuffix("```")
     m = _LOOSE_USER.match(text)
     return {"user": m.group(1).replace('"', "")} if m else None
 
@@ -173,7 +174,8 @@ def generate(scenarios: Iterable[Scenario], teacher: Chat, out_path: str | Path,
 
 
 def verify(examples: Iterable[Example], verifiers: list[tuple[str, Chat]],
-           out_path: str | Path, reject_path: str | Path, *, workers: int = 4) -> Counter:
+           out_path: str | Path, reject_path: str | Path, *, workers: int = 4,
+           max_tokens: int = 1500) -> Counter:
     """Round-trip check: a model that never saw the label must recover it from the text.
 
     Verifiers are tried in order and the example is kept as soon as one recovers the
@@ -181,20 +183,38 @@ def verify(examples: Iterable[Example], verifiers: list[tuple[str, Chat]],
     instance misreading "saade 4" as 16:00), which would quietly strip the hardest
     cases from the data. Examples every verifier rejects go to ``reject_path`` with
     all outputs attached; they are prime candidates for the hand-checked test set.
+
+    If a fallback verifier runs out of daily quota it is skipped for the rest of the
+    run (examples are then judged by the remaining ones); if the primary runs out,
+    the run stops and can be resumed later.
     """
     done = existing_ids(out_path, reject_path)
     todo = [e for e in examples if e.id not in done]
+    exhausted: set[str] = set()
 
     def work(ex: Example) -> tuple[str, dict]:
         attempts = []
-        for name, client in verifiers:
-            raw = client.chat(agent_messages(ex), temperature=0.0, max_tokens=700)
+        for rank, (name, client) in enumerate(verifiers):
+            if name in exhausted:
+                continue
+            try:
+                raw = client.chat(agent_messages(ex), temperature=0.0, max_tokens=max_tokens)
+            except QuotaExhausted:
+                if rank == 0:
+                    raise
+                exhausted.add(name)
+                print(f"[verify] {name} out of quota; continuing without it", file=sys.stderr)
+                continue
             s = score_example(ex, raw)
             attempts.append({"verifier": name, "output": raw, "error": s.error})
             if s.correct:
                 row = ex.model_dump()
                 row["meta"] = {**row["meta"], "verified_by": name, "verify_attempts": attempts}
                 return "ok", row
+        if len(attempts) < len(verifiers):
+            # Some verifier was skipped for quota: don't reject on partial evidence.
+            # Writing nothing means the next run retries this example.
+            return "deferred", {}
         row = ex.model_dump()
         row["meta"] = {**row["meta"], "verify_attempts": attempts}
         return "mismatch", row

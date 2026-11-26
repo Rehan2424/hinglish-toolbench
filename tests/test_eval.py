@@ -35,6 +35,12 @@ def test_extract_json_handles_fences_and_chatter():
     assert extract_json(text) == {"action": "respond", "message": "a {brace} inside"}
 
 
+def test_reasoning_blocks_are_ignored():
+    text = ('<thought>maybe {"action": "respond", "message": "no"}?</thought>'
+            '```json\n{"action": "call", "tool_calls": [{"name": "check_balance", "arguments": {}}]}```')
+    assert parse_prediction(text).action == "call"
+
+
 def test_parse_openai_style_string_arguments():
     p = parse_prediction('{"tool_calls":[{"function":{"name":"check_balance","arguments":"{}"}}]}')
     assert p.action == "call" and p.tool_calls == [{"name": "check_balance", "arguments": {}}]

@@ -23,6 +23,20 @@ PROVIDERS: dict[str, tuple[str, str | None]] = {
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
     "local": ("http://localhost:8080/v1", None),
 }
+
+# Request fields applied by default for some model families (overridable with --extra).
+# gpt-oss reasons at "medium" by default; "low" keeps answers fast and within
+# per-minute token limits without hurting this task.
+MODEL_DEFAULT_EXTRA: dict[str, dict] = {
+    "openai/gpt-oss": {"reasoning_effort": "low"},
+}
+
+
+def default_extra(model: str) -> dict:
+    for prefix, extra in MODEL_DEFAULT_EXTRA.items():
+        if model.startswith(prefix):
+            return dict(extra)
+    return {}
 RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
 
 
@@ -65,7 +79,7 @@ class ChatClient:
         if key_env and not self.api_key:
             raise LLMError(f"{key_env} is not set (add it to .env)")
         self.max_retries = max_retries
-        self.extra_body = dict(extra_body or {})
+        self.extra_body = default_extra(model) if extra_body is None else dict(extra_body)
         self._http = httpx.Client(timeout=timeout)
         self._min_gap = 60.0 / requests_per_minute if requests_per_minute else 0.0
         self._lock = threading.Lock()

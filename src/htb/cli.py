@@ -18,7 +18,7 @@ def _client(args: argparse.Namespace):
 
     load_dotenv()
     return ChatClient(args.provider, args.model, base_url=args.base_url,
-                      requests_per_minute=args.rpm,
+                      requests_per_minute=args.rpm, timeout=args.timeout,
                       extra_body=json.loads(args.extra) if args.extra else None)
 
 
@@ -28,6 +28,7 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-url", default=None, help="override the provider URL")
     p.add_argument("--rpm", type=float, default=None, help="requests-per-minute cap")
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--timeout", type=float, default=180.0, help="seconds per request")
     p.add_argument("--extra", default=None,
                    help='extra JSON fields for the request, e.g. \'{"reasoning_effort": "low"}\'')
 
@@ -80,21 +81,23 @@ def cmd_verify(args: argparse.Namespace) -> None:
     from .gen.pipeline import verify
 
     verifiers = [(f"{args.provider}/{args.model}", _client(args))]
-    if args.fallback_model:
-        fb = argparse.Namespace(**vars(args))
-        fb.provider = args.fallback_provider or args.provider
-        fb.model = args.fallback_model
-        fb.extra = args.fallback_extra
-        verifiers.append((f"{fb.provider}/{fb.model}", _client(fb)))
+    for spec in args.fallback or []:
+        provider, _, model = spec.partition(":")
+        if not model:
+            raise SystemExit(f"--fallback must look like provider:model, got {spec!r}")
+        fb = argparse.Namespace(**{**vars(args), "provider": provider, "model": model,
+                                   "extra": None, "rpm": args.fallback_rpm})
+        verifiers.append((f"{provider}/{model}", _client(fb)))
     stats = verify(_load_examples(args.examples), verifiers, args.out, args.rejects,
-                   workers=args.workers)
+                   workers=args.workers, max_tokens=args.max_tokens)
     print(dict(stats))
 
 
 def cmd_predict(args: argparse.Namespace) -> None:
     from .gen.pipeline import predict
 
-    stats = predict(_load_examples(args.examples), _client(args), args.out, workers=args.workers)
+    stats = predict(_load_examples(args.examples), _client(args), args.out, workers=args.workers,
+                    max_tokens=args.max_tokens)
     print(dict(stats))
 
 
@@ -200,14 +203,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--rejects", required=True)
     _add_model_args(p)
-    p.add_argument("--fallback-model", help="second verifier, tried only on mismatches")
-    p.add_argument("--fallback-provider", help="defaults to --provider")
-    p.add_argument("--fallback-extra", default=None)
+    p.add_argument("--fallback", action="append", metavar="PROVIDER:MODEL",
+                   help="extra verifier tried in order on mismatches (repeatable)")
+    p.add_argument("--fallback-rpm", type=float, default=3.5)
+    p.add_argument("--max-tokens", type=int, default=1500)
     p.set_defaults(fn=cmd_verify)
 
     p = sub.add_parser("predict", help="run a model on examples")
     p.add_argument("--examples", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--max-tokens", type=int, default=1500)
     _add_model_args(p)
     p.set_defaults(fn=cmd_predict)
 

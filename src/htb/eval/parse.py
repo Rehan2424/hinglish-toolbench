@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,12 +15,24 @@ class Prediction:
     message: str | None = None
 
 
+_REASONING = re.compile(r"<(think|thought|thinking)>.*?</\1>", re.DOTALL | re.IGNORECASE)
+
+
+def strip_reasoning(text: str) -> str:
+    """Remove visible reasoning blocks (``<think>``, ``<thought>``) some models emit.
+
+    JSON-like snippets inside the reasoning must never be mistaken for the answer.
+    """
+    return _REASONING.sub("", text)
+
+
 def extract_json(text: str) -> Any | None:
     """Return the first complete JSON object in ``text``.
 
-    Handles markdown fences, leading chatter and trailing text, which smaller models
-    produce often. Braces inside strings are respected.
+    Handles markdown fences, leading chatter, reasoning blocks and trailing text,
+    which smaller models produce often. Braces inside strings are respected.
     """
+    text = strip_reasoning(text)
     start = text.find("{")
     while start != -1:
         depth, in_str, esc = 0, False, False
