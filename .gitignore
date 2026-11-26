@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# secrets
+.env
+
+# generated data and runs (published separately)
+data/*.jsonl
+data/generated/
+preds/
+reports/*.json
+wandb/
+outputs/
+checkpoints/
+*.gguf
+*.safetensors
+
+.vscode/
+.idea/
+.DS_Store
