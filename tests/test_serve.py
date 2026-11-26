@@ -40,6 +40,22 @@ def test_assistant_validates_calls_and_builds_the_prompt():
     assert "2026-11-26T10:00 (Thursday)" in system and "User's city: Pune" in system
 
 
+def test_plain_text_assistant_turns_are_shown_to_the_model_as_json():
+    backend = Canned(CALL)
+    Assistant(backend).run([
+        {"role": "user", "content": "Priya ko paise bhejo"},
+        {"role": "assistant", "content": "Kitne paise?"},
+        {"role": "user", "content": "1500"},
+    ], now="2026-11-26T10:00")
+    turn = backend.prompt[2]["content"]
+    assert json.loads(turn) == {"action": "clarify", "message": "Kitne paise?"}
+    already_json = json.dumps({"action": "clarify", "message": "Kitne?"})
+    Assistant(backend).run([{"role": "user", "content": "a"},
+                            {"role": "assistant", "content": already_json},
+                            {"role": "user", "content": "b"}], now="2026-11-26T10:00")
+    assert backend.prompt[2]["content"] == already_json
+
+
 def test_assistant_reports_unparseable_output():
     r = Assistant(Canned("sorry, no idea")).run([{"role": "user", "content": "x"}])
     assert r.action == "error" and not r.ok

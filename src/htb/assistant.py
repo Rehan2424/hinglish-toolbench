@@ -8,12 +8,13 @@ Invalid calls are reported, never silently executed.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
-from .eval.parse import parse_prediction
+from .eval.parse import extract_json, parse_prediction
 from .prompting import render_system
 from .schema import Context
 from .tools import ToolCallError, canonicalize
@@ -46,6 +47,19 @@ def now_ist() -> str:
     return datetime.now(IST).strftime("%Y-%m-%dT%H:%M")
 
 
+def _as_model_turn(message: dict[str, str]) -> str:
+    """Earlier assistant turns must look like the model's own output (one JSON object),
+    as they do in the training data. A plain-text turn from a client is the follow-up
+    question it showed the user, so it is wrapped as a clarify action."""
+    content = message["content"]
+    if message["role"] != "assistant":
+        return content
+    obj = extract_json(content)
+    if isinstance(obj, dict) and "action" in obj:
+        return content
+    return json.dumps({"action": "clarify", "message": content}, ensure_ascii=False)
+
+
 class Assistant:
     def __init__(self, backend: ChatBackend, *, max_tokens: int = 512) -> None:
         self.backend = backend
@@ -58,7 +72,7 @@ class Assistant:
             raise ValueError("conversation must end with a user message")
         ctx = Context(now=now or now_ist(), city=city)
         prompt = [{"role": "system", "content": render_system(ctx)}]
-        prompt += [{"role": m["role"], "content": m["content"]} for m in messages]
+        prompt += [{"role": m["role"], "content": _as_model_turn(m)} for m in messages]
 
         start = time.perf_counter()
         raw = self.backend.chat(prompt, temperature=0.0, max_tokens=self.max_tokens)
