@@ -51,9 +51,26 @@ def _city_hint(rng: random.Random, role: str, city: str) -> str:
     return f"{role}: {city}"
 
 
+def _day_offset(rng: random.Random, lo: int, hi: int) -> int:
+    """Days from today, weighted toward how people actually refer to days.
+
+    A uniform spread over a month makes "kal" and "parso" rare, yet they are the
+    commonest and the most ambiguous forms. So: 55% today / tomorrow / day after,
+    25% within two weeks (weekday names, "agle hafte"), 20% anywhere in range.
+    """
+    r = rng.random()
+    if r < 0.55:
+        offset = rng.choice([0, 1, 1, 1, 2, 2, 2])
+    elif r < 0.8:
+        offset = rng.randint(3, 13)
+    else:
+        offset = rng.randint(lo, hi)
+    return min(max(offset, lo), hi)
+
+
 def _future_datetime(rng: random.Random, now: datetime, max_days: int = 14) -> datetime:
     while True:
-        day = now.date() + timedelta(days=rng.randint(0, max_days))
+        day = now.date() + timedelta(days=_day_offset(rng, 0, max_days))
         hh = rng.choice([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22])
         mm = rng.choice([0, 0, 0, 30, 30, 15, 45])
         dt = datetime(day.year, day.month, day.day, hh, mm)
@@ -97,7 +114,8 @@ def s_check_balance(rng: random.Random, ctx: Context) -> Draft:
 
 def s_transfer_money(rng: random.Random, ctx: Context) -> Draft:
     to = rng.choice(lx.PEOPLE)
-    amount = sample_amount(rng, 100, 50000)
+    big = rng.random() < 0.12  # rent, fees: the amounts people say in lakh
+    amount = rng.choice([100000, 150000, 200000, 250000]) if big else sample_amount(rng, 100, 50000)
     d = Draft("transfer_money", {"recipient": to, "amount": amount})
     d.hints["recipient"] = f"Recipient: {to}"
     d.hints["amount"] = f'Amount: "{amount_phrase(rng, amount)}"'
@@ -161,7 +179,7 @@ def s_recharge_mobile(rng: random.Random, ctx: Context) -> Draft:
 def s_search_trains(rng: random.Random, ctx: Context) -> Draft:
     src = ctx.city if rng.random() < 0.4 else rng.choice(lx.CITIES)
     dst = rng.choice([c for c in lx.CITIES if c != src])
-    day = ctx.dt.date() + timedelta(days=rng.randint(0, 20))
+    day = ctx.dt.date() + timedelta(days=_day_offset(rng, 0, 20))
     d = Draft("search_trains", {"source": src, "destination": dst, "date": day.isoformat()})
     if src == ctx.city and rng.random() < 0.7:
         d.hints["source"] = "Do not name the departure city (user leaves from where they are)"
@@ -196,7 +214,7 @@ def s_search_flights(rng: random.Random, ctx: Context) -> Draft:
     src = ctx.city if ctx.city in lx.AIRPORT_CITIES and rng.random() < 0.3 else rng.choice(
         lx.AIRPORT_CITIES)
     dst = rng.choice([c for c in lx.AIRPORT_CITIES if c != src])
-    day = ctx.dt.date() + timedelta(days=rng.randint(1, 30))
+    day = ctx.dt.date() + timedelta(days=_day_offset(rng, 1, 30))
     d = Draft("search_flights", {"source": src, "destination": dst, "date": day.isoformat()})
     if src == ctx.city and rng.random() < 0.6:
         d.hints["source"] = "Do not name the departure city (user flies from where they are)"
@@ -371,7 +389,7 @@ def s_get_weather(rng: random.Random, ctx: Context) -> Draft:
     d.hints["city"] = ("Do not name the city: the user means where they are ('yahan')"
                        if here else _city_hint(rng, "City", city))
     if rng.random() < 0.5:
-        day = ctx.dt.date() + timedelta(days=rng.randint(0, 5))
+        day = ctx.dt.date() + timedelta(days=_day_offset(rng, 0, 5))
         d.args["date"] = day.isoformat()
         d.hints["date"] = f'Day: "{future_date_phrase(rng, day, ctx.dt.date())}"'
     else:

@@ -150,6 +150,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
             + ["arg F1", "false-call", "parse", "latency p50 (s)"])
     lines = [f"n = {len(examples)} examples answered by every model", "",
              "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    reports = []
     for name, rows in runs:
         report, _ = evaluate(examples, {i: r["output"] for i, r in rows.items()})
         o = report["overall"]
@@ -160,6 +161,15 @@ def cmd_compare(args: argparse.Namespace) -> None:
         cells += [pct(o["arg_f1"]), pct(o["false_call_rate"]), pct(o["parse_rate"]),
                   f"{lat[len(lat) // 2]:.2f}" if lat else "-"]
         lines.append("| " + " | ".join(cells) + " |")
+        reports.append((name, report))
+    if args.phenomena:
+        tags = sorted({t for _, r in reports for t in r["by_phenomenon"]})
+        lines += ["", "| phenomenon | n | " + " | ".join(n for n, _ in reports) + " |",
+                  "|" + "---|" * (len(reports) + 2)]
+        for t in tags:
+            n = reports[0][1]["by_phenomenon"].get(t, {}).get("n", 0)
+            accs = [pct(r["by_phenomenon"].get(t, {}).get("task_accuracy")) for _, r in reports]
+            lines.append(f"| {t} | {n} | " + " | ".join(accs) + " |")
     print("\n".join(lines))
 
 
@@ -286,6 +296,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("compare", help="results table for several models")
     p.add_argument("--examples", required=True)
     p.add_argument("--predictions", nargs="+", required=True, metavar="[NAME=]PATH")
+    p.add_argument("--phenomena", action="store_true", help="also slice by Hinglish phenomenon")
     p.set_defaults(fn=cmd_compare)
 
     p = sub.add_parser("split", help="dedupe and split verified data into train/dev")

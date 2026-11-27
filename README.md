@@ -70,6 +70,8 @@ flowchart LR
 | aliases | *Bombay, Dilli, Banaras, Gurgaon*, Devanagari city names |
 | next occurrence | *"roz subah 8 baje"* at 10:00 → tomorrow 08:00, daily |
 
+Coverage needs more than variety: a uniform spread of dates over a month makes *kal* and *parso* rare, even though they are the most common forms and the most ambiguous. So the sampler weights dates toward the near term (55% within two days) and amounts toward their spoken forms. Measured on the phrasing hints, this gives 4.5× more *kal* and 6× more *parso* than uniform sampling.
+
 ## Evaluation
 
 The headline metric is **task accuracy**: an example counts as solved only if the action is right and, for calls, the set of calls matches exactly. Order doesn't matter, and arguments equal to their defaults are ignored. Diagnostics break failures down further:
@@ -89,7 +91,7 @@ Each argument is compared according to a policy declared in its tool definition:
 - **entity** for cities and people, ignoring case and resolving aliases, so *Bombay* = *Mumbai* = *मुंबई*.
 - **fuzzy** for free text: F1 over content words with function words removed, so *"Call mummy"* matches *"Mummy ko call"* but not *"Call papa"*. Each free-text label also accepts a short list of paraphrases plus the user's own phrasing (*"dinner split"* = *"dinner share"* = *"dinner ka hissa"*), similar to how BFCL allows multiple ground truths.
 
-Results are reported overall, by category, and by script.
+Results are reported overall, by category, by script, and **by Hinglish phenomenon**: *kal*, *parso*, weekday references, *saade/sava/paune* times, spoken amounts, colloquial city names, and implicit cities. Phenomena are detected from the message text itself (`src/htb/eval/phenomena.py`), so the slices also work on hand-edited or external data. Task accuracy comes with a 95% bootstrap confidence interval.
 
 ## Results
 
@@ -140,7 +142,7 @@ Every stage is resumable. Rerunning a command skips examples it has already proc
 **Test set.** Candidates come from a separate scenario seed and are hand-checked in an offline review page (keyboard-driven: accept, reject, or edit the label):
 
 ```bash
-htb review --examples data/test_pool/verified.jsonl data/test_pool/rejects_verify.jsonl \
+htb review --examples data/test_pool*/verified.jsonl data/test_pool*/rejects_verify.jsonl \
     --out data/review/test_review.html
 htb apply-review --candidates data/review/test_review.candidates.jsonl \
     --decisions review_decisions.json --out data/test.jsonl
@@ -152,6 +154,10 @@ htb split --examples data/train_*/verified.jsonl --exclude data/test.jsonl --out
 ```bash
 htb predict --examples data/test.jsonl --out preds/<name>.jsonl --provider <p> --model <m>
 htb eval --examples data/test.jsonl --predictions preds/<name>.jsonl --report reports/<name>.json
+
+# several models in one table, on the examples all of them answered
+htb compare --examples data/test.jsonl --phenomena \
+    --predictions qwen3-1.7b=preds/qwen3-1.7b.jsonl gpt-oss-20b=preds/gpt-oss-20b.jsonl
 ```
 
 ## Fine-tuning
@@ -215,6 +221,7 @@ src/htb/
     parse.py      robust JSON extraction from model output
     matching.py   per-field matching, call alignment
     metrics.py    scoring and reports
+    phenomena.py  tags examples by Hinglish phenomenon for sliced results
   llm.py          OpenAI-compatible client with retries and rate limiting
   assistant.py    live inference: prompt, parse, validate
   server.py       FastAPI service and demo page (demo.html)

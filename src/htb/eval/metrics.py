@@ -173,9 +173,16 @@ def bootstrap_ci(flags: list[bool], *, n_boot: int = 2000, seed: int = 0,
 
 def evaluate(examples: list[Example], outputs: dict[str, str]) -> tuple[dict, list[dict]]:
     """Score every example. Missing predictions count as unparseable."""
+    from .phenomena import tag
+
     scores = [score_example(ex, outputs.get(ex.id, "")) for ex in examples]
     report = aggregate(scores)
     report["overall"]["task_accuracy_ci95"] = list(bootstrap_ci([s.correct for s in scores]))
+    by_tag: dict[str, list[ExampleScore]] = defaultdict(list)
+    for ex, s in zip(examples, scores, strict=True):
+        for t in tag(ex):
+            by_tag[t].append(s)
+    report["by_phenomenon"] = {k: _summary(v) for k, v in sorted(by_tag.items())}
     return report, [asdict(s) for s in scores]
 
 
@@ -196,7 +203,9 @@ def to_markdown(report: dict, title: str = "Results") -> str:
     if "latency_s" in report:
         lat = report["latency_s"]
         lines.append(f"| latency median / p90 (s) | {lat['median']:.2f} / {lat['p90']:.2f} |")
-    for group in ("by_category", "by_script"):
+    for group in ("by_category", "by_script", "by_phenomenon"):
+        if not report.get(group):
+            continue
         lines += ["", f"| {group.split('_')[1]} | n | task acc | arg F1 |", "|---|---|---|---|"]
         for name, s in report[group].items():
             lines.append(f"| {name} | {s['n']} | {_fmt(s['task_accuracy'])} | {_fmt(s['arg_f1'])} |")

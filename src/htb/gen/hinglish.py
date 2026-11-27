@@ -27,13 +27,19 @@ HINDI_AMOUNTS: dict[int, list[str]] = {
     250: ["dhai sau"],
     300: ["teen sau"],
     500: ["paanch sau", "500"],
+    750: ["saade saat sau"],
     1000: ["ek hazaar", "1k", "hazaar rupaye"],
+    1200: ["barah sau"],
     1500: ["dedh hazaar", "pandrah sau"],
     2000: ["do hazaar", "2k"],
     2500: ["dhai hazaar", "pachchees sau"],
     3000: ["teen hazaar"],
+    3500: ["saade teen hazaar", "paintees sau"],
+    4000: ["chaar hazaar", "4k"],
     5000: ["paanch hazaar", "5k"],
+    7500: ["saade saat hazaar"],
     10000: ["das hazaar", "10k"],
+    12000: ["barah hazaar", "12k"],
     15000: ["pandrah hazaar"],
     20000: ["bees hazaar", "20k"],
     25000: ["pachchees hazaar"],
@@ -41,6 +47,7 @@ HINDI_AMOUNTS: dict[int, list[str]] = {
     100000: ["ek lakh", "1 lakh"],
     150000: ["dedh lakh"],
     200000: ["do lakh"],
+    250000: ["dhai lakh"],
 }
 
 
@@ -62,15 +69,15 @@ def indian_grouping(n: int) -> str:
 def amount_phrase(rng: random.Random, amount: float) -> str:
     n = int(amount)
     options = [str(n), f"₹{indian_grouping(n)}", f"{indian_grouping(n)} rupaye"]
-    if n in HINDI_AMOUNTS:
-        options += HINDI_AMOUNTS[n] * 2  # favour spoken forms when they exist
+    if n in HINDI_AMOUNTS and rng.random() < 0.7:
+        return rng.choice(HINDI_AMOUNTS[n])  # spoken forms are the point of the dataset
     return rng.choice(options)
 
 
 def sample_amount(rng: random.Random, lo: int, hi: int) -> int:
     """Mostly round amounts people actually say, sometimes an exact odd value."""
     round_ones = [a for a in HINDI_AMOUNTS if lo <= a <= hi]
-    if round_ones and rng.random() < 0.6:
+    if round_ones and rng.random() < 0.7:
         return rng.choice(round_ones)
     step = 50 if rng.random() < 0.6 else 1
     return max(lo, rng.randrange(lo, hi + 1, step))
@@ -129,9 +136,9 @@ def future_date_phrase(rng: random.Random, target: date, today: date) -> str:
     if delta == 0:
         options += ["aaj", "aaj", "today"]
     elif delta == 1:
-        options += ["kal", "kal", "kal", "tomorrow"]
+        options += ["kal"] * 5 + ["tomorrow"]
     elif delta == 2:
-        options += ["parso", "parso", "day after tomorrow"]
+        options += ["parso"] * 5 + ["day after tomorrow"]
     if 1 <= delta <= 6:
         options += [f"is {WEEKDAYS_EN[wd]}", f"{WEEKDAYS_HI[wd]} ko", f"coming {WEEKDAYS_EN[wd]}"]
     next_monday = today + timedelta(days=7 - today.weekday())
