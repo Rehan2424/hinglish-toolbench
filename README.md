@@ -95,6 +95,14 @@ Results are reported overall, by category, and by script.
 
 *Coming soon:* hosted API baselines, zero-shot and few-shot small models, and the fine-tuned model (full precision and 4-bit), with CPU latency and cost per 1,000 requests.
 
+## Limitations
+
+- The messages are synthetic: an LLM wrote them from controlled hints. They cover the targeted Hinglish phenomena reliably, but are cleaner than real chat or speech-to-text input.
+- Every example passed a round-trip check by one of the verifier models (Gemma 4 31B, gpt-oss-120b, Qwen3.8-27B), so those models are flagged as optimistic in the results. Test candidates that all verifiers rejected were still hand-reviewed, which reduces this bias.
+- One annotator verified the test set.
+
+More detail is in the [datasheet](docs/DATASHEET.md).
+
 ## Related work
 
 - **Tool-calling benchmarks.** [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html) set the standard categories (simple, parallel, relevance, irrelevance) that this benchmark follows. [BFCL-Hi](https://arxiv.org/abs/2508.19831) and [MLCL](https://arxiv.org/abs/2601.05366) translate BFCL queries into Hindi and other languages. Both use formal, translated Hindi with generic tools. This benchmark targets what Indian users actually type: romanized, code-mixed Hinglish, India-specific services (UPI, PNR, 3AC), and spoken forms of dates, times and amounts.
