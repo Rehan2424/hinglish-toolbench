@@ -16,6 +16,7 @@ Diagnostics:
 
 from __future__ import annotations
 
+import random
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 
@@ -156,10 +157,26 @@ def aggregate(scores: list[ExampleScore]) -> dict:
     }
 
 
+def bootstrap_ci(flags: list[bool], *, n_boot: int = 2000, seed: int = 0,
+                 level: float = 0.95) -> tuple[float, float]:
+    """Percentile bootstrap interval for a mean of 0/1 outcomes."""
+    n = len(flags)
+    if not n:
+        return (0.0, 0.0)
+    rng = random.Random(seed)
+    vals = [int(f) for f in flags]
+    stats = sorted(sum(vals[rng.randrange(n)] for _ in range(n)) / n for _ in range(n_boot))
+    lo = stats[int((1 - level) / 2 * n_boot)]
+    hi = stats[int((1 + level) / 2 * n_boot) - 1]
+    return (round(lo, 4), round(hi, 4))
+
+
 def evaluate(examples: list[Example], outputs: dict[str, str]) -> tuple[dict, list[dict]]:
     """Score every example. Missing predictions count as unparseable."""
     scores = [score_example(ex, outputs.get(ex.id, "")) for ex in examples]
-    return aggregate(scores), [asdict(s) for s in scores]
+    report = aggregate(scores)
+    report["overall"]["task_accuracy_ci95"] = list(bootstrap_ci([s.correct for s in scores]))
+    return report, [asdict(s) for s in scores]
 
 
 def _fmt(v: float | None) -> str:
@@ -173,6 +190,9 @@ def to_markdown(report: dict, title: str = "Results") -> str:
               "hallucination_rate", "tool_selection_accuracy", "arg_precision", "arg_recall",
               "arg_f1", "false_call_rate"):
         lines.append(f"| {k} | {_fmt(o[k])} |")
+    if "task_accuracy_ci95" in o:
+        lo, hi = o["task_accuracy_ci95"]
+        lines.insert(5, f"| task_accuracy 95% CI | {_fmt(lo)} to {_fmt(hi)} |")
     if "latency_s" in report:
         lat = report["latency_s"]
         lines.append(f"| latency median / p90 (s) | {lat['median']:.2f} / {lat['p90']:.2f} |")

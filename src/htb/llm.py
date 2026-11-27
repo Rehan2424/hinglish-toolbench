@@ -65,6 +65,20 @@ class QuotaExhausted(LLMError):
 _DAILY_QUOTA = re.compile(r"per day|RPD|PerDay|TPD", re.IGNORECASE)
 
 
+def _failed_generation(r: httpx.Response) -> str | None:
+    """Some servers (Groq) reject a reply in which the model emitted a native tool call
+    even though no tools were passed, and return the text in ``failed_generation``.
+    That text is the model's answer, so it is returned for scoring instead of dropped."""
+    if r.status_code != 400 or "failed_generation" not in r.text:
+        return None
+    try:
+        err = r.json().get("error", {})
+    except ValueError:
+        return None
+    text = err.get("failed_generation")
+    return text if isinstance(text, str) and text.strip() else None
+
+
 class ChatClient:
     def __init__(self, provider: str, model: str, *, base_url: str | None = None,
                  api_key: str | None = None, timeout: float = 90.0, max_retries: int = 6,
@@ -120,6 +134,9 @@ class ChatClient:
                         return data["choices"][0]["message"]["content"] or ""
                     except (KeyError, IndexError) as exc:
                         raise LLMError(f"unexpected response: {str(data)[:300]}") from exc
+                generated = _failed_generation(r)
+                if generated is not None:
+                    return generated
                 if r.status_code == 429 and _DAILY_QUOTA.search(r.text):
                     raise QuotaExhausted(f"daily quota used up for {self.model}: {r.text[:200]}")
                 if r.status_code not in RETRY_STATUS or attempt == self.max_retries:

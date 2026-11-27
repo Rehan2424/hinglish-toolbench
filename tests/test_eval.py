@@ -46,6 +46,24 @@ def test_parse_openai_style_string_arguments():
     assert p.action == "call" and p.tool_calls == [{"name": "check_balance", "arguments": {}}]
 
 
+def test_parse_bare_call_object():
+    p = parse_prediction('{"name": "book_cab", "arguments": {"drop": "City Mall"}}')
+    assert p.action == "call" and p.tool_calls == [{"name": "book_cab",
+                                                    "arguments": {"drop": "City Mall"}}]
+
+
+def test_groq_failed_generation_is_returned_as_the_answer():
+    import httpx
+
+    from htb.llm import ChatClient
+
+    body = {"error": {"code": "tool_use_failed", "failed_generation": '{"name": "check_balance"}'}}
+    transport = httpx.MockTransport(lambda req: httpx.Response(400, json=body))
+    client = ChatClient("local", "m")
+    client._http = httpx.Client(transport=transport)
+    assert client.chat([{"role": "user", "content": "x"}]) == '{"name": "check_balance"}'
+
+
 @pytest.mark.parametrize("text", ["", "no json here", '{"action": "dance"}',
                                   '{"action": "call", "tool_calls": []}', "[1, 2]"])
 def test_unusable_outputs(text):
@@ -132,6 +150,32 @@ def test_abstention():
     assert not s.correct and s.pred_action == "call"
     clar = make(action="clarify", category="clarify")
     assert not score_example(clar, out(action="respond", message="no")).correct
+
+
+def test_bootstrap_ci_brackets_the_mean():
+    from htb.eval.metrics import bootstrap_ci
+    flags = [True] * 70 + [False] * 30
+    lo, hi = bootstrap_ci(flags)
+    assert lo < 0.7 < hi and hi - lo < 0.25
+    assert bootstrap_ci([True] * 10) == (1.0, 1.0)
+
+
+def test_compare_uses_only_examples_every_model_answered(tmp_path, capsys):
+    from htb.cli import main
+    ex_a = make([("check_balance", {})])
+    ex_b = make([("check_balance", {})]).model_copy(update={"id": "u"})
+    examples = tmp_path / "ex.jsonl"
+    examples.write_text("\n".join(e.model_dump_json() for e in (ex_a, ex_b)), encoding="utf-8")
+    good = out([("check_balance", {})])
+    full = tmp_path / "full.jsonl"
+    full.write_text("\n".join(json.dumps({"id": i, "output": good, "latency_s": 1.0})
+                              for i in ("t", "u")), encoding="utf-8")
+    part = tmp_path / "part.jsonl"
+    part.write_text(json.dumps({"id": "t", "output": "nonsense"}), encoding="utf-8")
+    main(["compare", "--examples", str(examples), "--predictions", f"big={full}", str(part)])
+    text = capsys.readouterr().out
+    assert "n = 1 examples" in text
+    assert "| big | 100.0 (100.0–100.0)" in text and "| part | 0.0" in text
 
 
 def test_report_aggregates():

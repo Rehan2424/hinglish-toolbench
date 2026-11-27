@@ -127,6 +127,42 @@ def cmd_eval(args: argparse.Namespace) -> None:
     print(to_markdown(report, title=args.title or Path(args.predictions or "oracle").stem))
 
 
+def cmd_compare(args: argparse.Namespace) -> None:
+    """One results table for several models, on the examples every model has answered."""
+    from .eval.metrics import evaluate
+
+    examples = _load_examples(args.examples)
+    runs = []
+    for spec in args.predictions:
+        name, _, path = spec.rpartition("=") if "=" in spec else (Path(spec).stem, "", spec)
+        rows = {r["id"]: r for r in read_jsonl(path)}
+        runs.append((name, rows))
+    common = set.intersection(*(set(rows) for _, rows in runs)) if runs else set()
+    examples = [e for e in examples if e.id in common]
+    if not examples:
+        raise SystemExit("no example has a prediction from every model")
+
+    def pct(v):
+        return "-" if v is None else f"{100 * v:.1f}"
+
+    scripts = sorted({e.script for e in examples})
+    head = (["model", "task acc (95% CI)"] + scripts
+            + ["arg F1", "false-call", "parse", "latency p50 (s)"])
+    lines = [f"n = {len(examples)} examples answered by every model", "",
+             "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for name, rows in runs:
+        report, _ = evaluate(examples, {i: r["output"] for i, r in rows.items()})
+        o = report["overall"]
+        lo, hi = o["task_accuracy_ci95"]
+        lat = sorted(rows[e.id]["latency_s"] for e in examples if "latency_s" in rows[e.id])
+        cells = [name, f"{pct(o['task_accuracy'])} ({pct(lo)}–{pct(hi)})"]
+        cells += [pct(report["by_script"].get(s, {}).get("task_accuracy")) for s in scripts]
+        cells += [pct(o["arg_f1"]), pct(o["false_call_rate"]), pct(o["parse_rate"]),
+                  f"{lat[len(lat) // 2]:.2f}" if lat else "-"]
+        lines.append("| " + " | ".join(cells) + " |")
+    print("\n".join(lines))
+
+
 def cmd_export_sft(args: argparse.Namespace) -> None:
     from .sft import to_sft
 
@@ -246,6 +282,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--details", help="write per-example scores (JSONL) here")
     p.add_argument("--title")
     p.set_defaults(fn=cmd_eval)
+
+    p = sub.add_parser("compare", help="results table for several models")
+    p.add_argument("--examples", required=True)
+    p.add_argument("--predictions", nargs="+", required=True, metavar="[NAME=]PATH")
+    p.set_defaults(fn=cmd_compare)
 
     p = sub.add_parser("split", help="dedupe and split verified data into train/dev")
     p.add_argument("--examples", nargs="+", required=True)

@@ -82,6 +82,8 @@ def parse_prediction(text: str) -> Prediction | None:
     obj = extract_json(text or "")
     if not isinstance(obj, dict):
         return None
+    if "name" in obj and "action" not in obj and "tool_calls" not in obj:
+        obj = {"action": "call", "tool_calls": [obj]}  # a bare call object
     raw_calls = obj.get("tool_calls") or []
     if not isinstance(raw_calls, list):
         return None
